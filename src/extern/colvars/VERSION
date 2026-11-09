@@ -1,3 +1,3 @@
 Colvars commit c738903c508911ccc51b5ec1fe5df784cadf3132 (2026-11-09, "Update version strings")
 source: https://github.com/Colvars/colvars.git
-vendored: src/ -> src/ (Lepton not vendored: Colvars fetches it at build time; built with COLVARS_LEPTON off, so no customFunction CVs)
+vendored: Colvars src/ -> src/; Lepton from OpenMM 35ba12a95586a4780fbf06421f8c0c1dbff55b5b (2026-11-09) libraries/lepton/{include,src} -> lepton/ (the source Colvars fetches; built without LEPTON_USE_JIT)
