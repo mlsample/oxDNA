@@ -68,6 +68,12 @@ void colvarproxy_oxdna::setup_module(const settings &s) {
 	if(cvmodule->read_config_file(s.config_file.c_str()) != COLVARS_OK) {
 		throw oxDNAException("Colvars: error while reading the configuration file '%s'", s.config_file.c_str());
 	}
+	// "colvarsRestartFrequency 0" in the config: OPES computes "step % colvarsRestartFrequency"
+	// at every step without checking for zero (SIGFPE). With "pmf on" OPES already fails while
+	// the config is parsed, before this check can run (see docs/colvars/DESIGN.md).
+	if(cvmodule->restart_out_freq == 0) {
+		throw oxDNAException("Colvars: colvarsRestartFrequency must be a positive number of steps; 0 is not supported by the oxDNA interface");
+	}
 	if(cvmodule->size() == 0) {
 		OX_LOG(Logger::LOG_WARNING, "Colvars: the configuration file '%s' defines no variables or biases", s.config_file.c_str());
 	}

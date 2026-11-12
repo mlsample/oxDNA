@@ -67,6 +67,10 @@ void OxpyManager::print_configuration(bool also_last) {
 		// prints the last configuration
 		_backend->print_conf(false, true);
 	}
+#ifdef OXDNA_COLVARS
+	// both branches write the lastconf file: write the Colvars state for the same step
+	_backend->on_run_end();
+#endif
 }
 
 void OxpyManager::add_output(std::string filename, llint print_every, std::vector<ObservablePtr> observables) {
@@ -180,6 +184,8 @@ input: :class:`InputFile`
         ----------
             also_last : bool
                 If True (default value) prints the current configuration also in the "lastconf_file" file.  
+
+        If Colvars is enabled (``colvars_file``), this also writes the Colvars state (``<colvars_output_prefix>.colvars.state``) and the bias output files for the current step.
 	)pbdoc");
 
 	manager.def("config_info", &OxpyManager::config_info, R"pbdoc(
@@ -254,6 +260,8 @@ input: :class:`InputFile`
 				The number of steps to be run.
 			print_output : bool
 				If True (the default value) the simulation output will be printed.
+
+		If Colvars is enabled (``colvars_file``), the end-of-run Colvars state is not written by this method: it is written by :meth:`print_configuration` and by :meth:`run_complete`, together with the last configuration (periodic Colvars restart files are still written every ``colvars_restart_frequency`` steps).
 	)pbdoc");
 
 	manager.def("steps_run", &OxpyManager::steps_run, R"pbdoc(

@@ -5,7 +5,7 @@
 
 #include "ColvarsManager.h"
 
-#include <cstdlib>
+#include <random>
 
 #include "colvarproxy_oxdna.h"
 
@@ -14,6 +14,7 @@
 #include "../Utilities/Logger.h"
 #include "../Utilities/oxDNAException.h"
 #include "../Utilities/parse_input/parse_input.h"
+#include "../Utilities/Utils.h"
 
 ColvarsManager::ColvarsManager() {
 
@@ -45,16 +46,37 @@ void ColvarsManager::init(input_file &inp, std::vector<BaseParticle *> &particle
 	if(getInputLLInt(&inp, "colvars_restart_frequency", &restart_freq, 0) == KEY_NOT_FOUND) {
 		getInputLLInt(&inp, "print_conf_interval", &restart_freq, 0);
 	}
-	if(restart_freq < 0) {
-		throw oxDNAException("Colvars: colvars_restart_frequency must be >= 0 (0 = write the state only at the end)");
+	// Colvars biases (e.g. OPES) compute "step % restart frequency" without checking for zero
+	if(restart_freq <= 0) {
+		throw oxDNAException("Colvars: colvars_restart_frequency (or print_conf_interval, its default) must be a positive number of steps, not %lld", restart_freq);
+	}
+	if(restart_freq > INT32_MAX) {
+		throw oxDNAException("Colvars: colvars_restart_frequency (or print_conf_interval, its default) must be at most %d, not %lld", INT32_MAX, restart_freq);
 	}
 	_restart_frequency = (int) restart_freq;
 
-	if(getInputLLInt(&inp, "colvars_seed", &_seed, 0) == KEY_NOT_FOUND) {
-		_seed = (long long) lrand48();
-	}
-
 	_initial_step = CONFIG_INFO->curr_step;
+
+	// the default seed must not consume oxDNA's drand48 stream: Colvars on/off would change the trajectory
+	long long seed_in = 0;
+	std::string seed_source;
+	if(getInputLLInt(&inp, "colvars_seed", &seed_in, 0) == KEY_FOUND) {
+		_seed = (uint64_t) seed_in;
+		seed_source = "colvars_seed";
+	}
+	else {
+		int oxdna_seed = 0;
+		if(getInputInt(&inp, "seed", &oxdna_seed, 0) == KEY_FOUND) {
+			_seed = derive_seed(oxdna_seed, _initial_step);
+			seed_source = Utils::sformat("derived from seed = %d and initial step %lld", oxdna_seed, _initial_step);
+		}
+		else {
+			// oxDNA itself is not reproducible without "seed"
+			std::random_device rd;
+			_seed = ((uint64_t) rd() << 32) ^ (uint64_t) rd();
+			seed_source = "drawn from std::random_device, since seed is not set";
+		}
+	}
 
 	colvarproxy_oxdna::settings s;
 	s.config_file = _config_file;
@@ -73,8 +95,9 @@ void ColvarsManager::init(input_file &inp, std::vector<BaseParticle *> &particle
 		}
 	}
 
-	OX_LOG(Logger::LOG_INFO, "Colvars: config = '%s', output prefix = '%s', input state = '%s', restart frequency = %d, seed = %lld, T = %g K, dt = %g fs, initial step = %lld",
-			_config_file.c_str(), _output_prefix.c_str(), _input_state.c_str(), _restart_frequency, _seed, s.temperature_K, s.timestep_fs, _initial_step);
+	OX_LOG(Logger::LOG_INFO, "Colvars: config = '%s', output prefix = '%s', input state = '%s', restart frequency = %d, T = %g K, dt = %g fs, initial step = %lld",
+			_config_file.c_str(), _output_prefix.c_str(), _input_state.c_str(), _restart_frequency, s.temperature_K, s.timestep_fs, _initial_step);
+	OX_LOG(Logger::LOG_INFO, "Colvars: random number generator seed = %llu (%s)", (unsigned long long) _seed, seed_source.c_str());
 
 	_proxy = std::make_unique<colvarproxy_oxdna>();
 	_proxy->setup_module(s);
@@ -88,7 +111,7 @@ void ColvarsManager::init(input_file &inp, std::vector<BaseParticle *> &particle
 	_cached_forces.assign(_requested_indices.size(), LR_vector(0., 0., 0.));
 	_last_energy = 0.;
 	_last_step = -1;
-	_finalised = false;
+	_finalised_step = -1;
 	_enabled = true;
 
 	// follow temperature changes (e.g. T updated from oxpy)
@@ -162,13 +185,34 @@ llint ColvarsManager::last_step() const {
 }
 
 void ColvarsManager::on_run_end(llint step) {
-	if(!_enabled || _finalised) {
+	if(!_enabled) {
+		return;
+	}
+	if(_last_step < 0) {
+		OX_LOG(Logger::LOG_INFO, "Colvars: no step has been evaluated, the Colvars state is not written");
+		return;
+	}
+	if(_last_step == _finalised_step) {
+		// nothing new since the last write
 		return;
 	}
 	if(step != _last_step) {
-		OX_LOG(Logger::LOG_WARNING, "Colvars: run ended at step %lld but the last Colvars evaluation was at step %lld", step, _last_step);
+		OX_LOG(Logger::LOG_WARNING, "Colvars: the configuration was printed at step %lld but the last Colvars evaluation was at step %lld", step, _last_step);
 	}
-	_finalised = true;
+	_finalised_step = _last_step;
 	_proxy->finalise();
-	OX_LOG(Logger::LOG_INFO, "Colvars: final state written to %s.colvars.state", _output_prefix.c_str());
+	OX_LOG(Logger::LOG_INFO, "Colvars: state at step %lld written to %s.colvars.state", _last_step, _output_prefix.c_str());
+}
+
+uint64_t ColvarsManager::derive_seed(long long oxdna_seed, llint initial_step) {
+	// splitmix64 finaliser (Steele, Lea and Flood 2014): a fixed, platform-independent mix
+	auto mix = [](uint64_t z) {
+		z += 0x9E3779B97F4A7C15ULL;
+		z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+		z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+		return z ^ (z >> 31);
+	};
+	// the constant separates this stream from any other use of the oxDNA seed
+	const uint64_t COLVARS_SEED_SALT = 0x436F6C7661727331ULL;   // "Colvars1"
+	return mix(mix((uint64_t) oxdna_seed ^ COLVARS_SEED_SALT) ^ (uint64_t) initial_step);
 }

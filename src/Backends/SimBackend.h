@@ -225,7 +225,9 @@ public:
 
 #ifdef OXDNA_COLVARS
 	/**
-	 * @brief Called by SimManager::run() once, after the final configuration has been printed.
+	 * @brief Called after the last configuration has been printed (by SimManager::run() and by
+	 * oxpy's print_configuration()), so that backend-owned state (e.g. the Colvars state) can be
+	 * written for the same step. It may be called more than once per run.
 	 */
 	virtual void on_run_end() {}
 #endif

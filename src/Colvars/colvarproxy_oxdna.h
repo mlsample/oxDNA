@@ -34,7 +34,7 @@ public:
 		std::string config_file;        ///< Colvars configuration file
 		std::string output_prefix;      ///< output and restart prefix
 		std::string input_state;        ///< prefix (or path) of the state file to read; may be empty
-		int restart_frequency = 0;      ///< default restart frequency (steps)
+		int restart_frequency = 1;      ///< default restart frequency (steps, > 0)
 		uint64_t seed = 0;              ///< seed of the Gaussian RNG
 		double temperature_K = 0.;      ///< target temperature (K)
 		double timestep_fs = 1.;        ///< integration timestep (fs)

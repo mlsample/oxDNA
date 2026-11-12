@@ -34,8 +34,8 @@ using namespace std;
  [colvars_file = <path> (Colvars configuration file; enables Colvars biases on MD runs. Requires oxDNA compiled with -DCOLVARS=ON. Colvars atom numbers are particle index + 1 and Colvars works in oxDNA units ("units oxdna"))]
  [colvars_output_prefix = <string> (prefix of the Colvars output files, e.g. <prefix>.colvars.traj and <prefix>.colvars.state. Defaults to colvars)]
  [colvars_input_state = <path> (Colvars state file (or its prefix) to restart from. Defaults to none)]
- [colvars_restart_frequency = <int> (every how many steps the Colvars state file is written; 0 means only at the end. Defaults to print_conf_interval)]
- [colvars_seed = <int> (seed of the Colvars Gaussian random number generator. Defaults to a number drawn from the oxDNA random number generator)]
+ [colvars_restart_frequency = <int> (every how many steps the Colvars state file is written; must be > 0. The state is also written together with the last configuration at the end of the run. Defaults to print_conf_interval)]
+ [colvars_seed = <int> (seed of the Colvars Gaussian random number generator. Defaults to a fixed hash of the oxDNA seed and of the initial step, which does not consume oxDNA random numbers)]
  @endverbatim
  */
 

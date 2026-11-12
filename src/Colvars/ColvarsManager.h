@@ -144,12 +144,26 @@ public:
 	llint last_step() const;
 
 	/**
-	 * @brief Finalise the run: proxy->post_run() writes <colvars_output_prefix>.colvars.state
-	 * and the bias output files, then flushes all Colvars streams.
-	 * @param step final MD step (must equal last_step(), otherwise a warning is logged).
-	 * Safe to call when !enabled() (no-op) and idempotent (second call is a no-op).
+	 * @brief Write the Colvars state that goes with the last configuration: proxy->post_run()
+	 * writes <colvars_output_prefix>.colvars.state and the bias output files, then flushes all
+	 * Colvars streams.
+	 *
+	 * Called whenever the last configuration is printed and the run may stop there
+	 * (SimManager::run, oxpy's print_configuration()), so that the state and lastconf describe
+	 * the same step. It can be called repeatedly: it writes only when a step has been evaluated
+	 * since the previous write (so a run_steps() after run_complete() is written again).
+	 *
+	 * @param step step of the printed configuration (should equal last_step(), otherwise a
+	 *             warning is logged). Safe to call when !enabled() (no-op).
 	 */
 	void on_run_end(llint step);
+
+	/**
+	 * @brief Default seed of the Colvars RNG when colvars_seed is not set: a fixed hash
+	 * (splitmix64) of oxDNA's `seed` input value and of the initial step. It does not touch
+	 * oxDNA's drand48 stream, so adding Colvars does not change the oxDNA random numbers.
+	 */
+	static uint64_t derive_seed(long long oxdna_seed, llint initial_step);
 
 private:
 	std::unique_ptr<colvarproxy_oxdna> _proxy;   // owns the colvarmodule
@@ -160,14 +174,14 @@ private:
 	llint _initial_step = 0;                      // CONFIG_INFO->curr_step at init (S0)
 	std::shared_ptr<bool> _alive;                 // guards the CONFIG_INFO "T_updated" callback
 	bool _enabled = false;
-	bool _finalised = false;
+	llint _finalised_step = -1;                   // step of the last on_run_end() write; -1 = none
 
 	// parsed input keys (see DESIGN.md "Input keys")
 	std::string _config_file;           // colvars_file (required to enable)
 	std::string _output_prefix;         // colvars_output_prefix, default "colvars"
 	std::string _input_state;           // colvars_input_state, default "" (none)
-	int _restart_frequency = 0;         // colvars_restart_frequency, default print_conf_interval
-	long long _seed = -1;               // colvars_seed; -1 = draw one with lrand48() at init
+	int _restart_frequency = 0;         // colvars_restart_frequency (> 0), default print_conf_interval
+	uint64_t _seed = 0;                 // colvars_seed, default derive_seed(seed, initial step)
 };
 
 #endif /* OXDNA_COLVARS_MANAGER_H_ */
