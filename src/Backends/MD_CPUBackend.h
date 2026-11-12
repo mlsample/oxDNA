@@ -37,7 +37,7 @@ protected:
 	void _update_backend_info();
 
 #ifdef OXDNA_COLVARS
-	/// step that the next _compute_forces() call evaluates (see docs/colvars/DESIGN.md, step counter)
+	/// step that the next _compute_forces() call evaluates (Colvars evaluates step S0 at init, then S0+1 ... S0+N)
 	llint _colvars_step = 0;
 	std::vector<LR_vector> _colvars_positions;
 	std::vector<LR_vector> _colvars_forces;

@@ -44,6 +44,7 @@ Please cite these publications for any work that uses the oxDNA simulation packa
    forces.md
    observables.md
    umbrella_sampling.md
+   colvars.md
    ffs.md
    events.md
 ```

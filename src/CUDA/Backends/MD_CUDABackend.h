@@ -81,7 +81,7 @@ protected:
 
 	/**
 	 * Colvars host round trip (used only when oxDNA is built with -DCOLVARS=ON and the input sets
-	 * colvars_file; see docs/colvars/DESIGN.md section 3.3). The members are declared
+	 * colvars_file; see docs/source/colvars.md). The members are declared
 	 * unconditionally so that the class layout does not depend on OXDNA_COLVARS being defined
 	 * consistently in every translation unit that includes this header.
 	 */

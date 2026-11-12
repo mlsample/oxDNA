@@ -70,7 +70,7 @@ void colvarproxy_oxdna::setup_module(const settings &s) {
 	}
 	// "colvarsRestartFrequency 0" in the config: OPES computes "step % colvarsRestartFrequency"
 	// at every step without checking for zero (SIGFPE). With "pmf on" OPES already fails while
-	// the config is parsed, before this check can run (see docs/colvars/DESIGN.md).
+	// the config is parsed, before this check can run (a known Colvars issue).
 	if(cvmodule->restart_out_freq == 0) {
 		throw oxDNAException("Colvars: colvarsRestartFrequency must be a positive number of steps; 0 is not supported by the oxDNA interface");
 	}

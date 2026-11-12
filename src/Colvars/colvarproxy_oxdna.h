@@ -5,7 +5,7 @@
  * Built only with -DCOLVARS=ON. This header includes Colvars headers (C++17) and must NOT be
  * included from nvcc-compiled translation units: the backends talk to ColvarsManager only.
  *
- * Conventions (see docs/colvars/DESIGN.md):
+ * Conventions (see docs/source/colvars.md):
  *   - Colvars atom number = oxDNA particle index + 1; the internal atom id is the 0-based index.
  *   - Colvars internal units == oxDNA simulation units ("oxdna" unit system).
  *   - Positions handed in are unwrapped; Colvars applies its own minimum image through

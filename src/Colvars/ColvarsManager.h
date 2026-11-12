@@ -2,9 +2,8 @@
  * @file    ColvarsManager.h
  * @brief   oxDNA-side facade over the Colvars library (engine-proxy interface).
  *
- * CONTRACT HEADER (see docs/colvars/DESIGN.md and docs/colvars/CONTRACT_NOTES.md).
- * Implementer A writes ColvarsManager.cpp + colvarproxy_oxdna.{h,cpp} against this file;
- * implementer B calls it from the CUDA backend. Changing a signature here requires both.
+ * The MD backends (CPU and CUDA) talk to Colvars only through this class; the Colvars-side
+ * implementation lives in colvarproxy_oxdna.{h,cpp}. User documentation: docs/source/colvars.md.
  *
  * This header must stay includable from nvcc-compiled translation units (.cu): it includes
  * only oxDNA headers and forward-declares every Colvars type. No Colvars header may be
