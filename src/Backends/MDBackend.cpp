@@ -41,6 +41,30 @@ void MDBackend::get_settings(input_file &inp) {
 	getInputNumber(&inp, "dt", &_dt, 1);
 
 	getInputBool(&inp, "use_barostat", &_use_barostat, 0);
+
+#ifdef OXDNA_COLVARS
+	std::string colvars_file;
+	if(getInputString(&inp, "colvars_file", colvars_file, 0) == KEY_FOUND) {
+		if(_use_barostat) {
+			throw oxDNAException("Colvars (colvars_file) is not compatible with use_barostat = true");
+		}
+		if(_lees_edwards) {
+			throw oxDNAException("Colvars (colvars_file) is not compatible with Lees-Edwards boundary conditions");
+		}
+		llint equilibration_steps = 0;
+		getInputLLInt(&inp, "equilibration_steps", &equilibration_steps, 0);
+		if(equilibration_steps > 0) {
+			throw oxDNAException("Colvars (colvars_file) is not compatible with equilibration_steps > 0");
+		}
+	}
+	_colvars = std::make_unique<ColvarsManager>();
+#else
+	std::string colvars_file;
+	if(getInputString(&inp, "colvars_file", colvars_file, 0) == KEY_FOUND) {
+		throw oxDNAException("colvars_file is set, but oxDNA was compiled without Colvars support (-DCOLVARS=ON)");
+	}
+#endif
+
 	if(_use_barostat) {
 		if(_lees_edwards) {
 			throw oxDNAException("Lees-Edwards boundaries are not compatible with isobaric simulations");
@@ -168,6 +192,14 @@ void MDBackend::fix_diffusion() {
 	if(_reset_com_momentum) MDBackend::_reset_momentum();
 	SimBackend::fix_diffusion();
 }
+
+#ifdef OXDNA_COLVARS
+void MDBackend::on_run_end() {
+	if(_colvars) {
+		_colvars->on_run_end(current_step());
+	}
+}
+#endif
 
 void MDBackend::print_observables() {
 	if(_use_barostat) {

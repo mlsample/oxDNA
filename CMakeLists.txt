@@ -24,6 +24,7 @@ OPTION(NATIVE_COMPILATION "Set to OFF to compile without the -march=native flag.
 OPTION(JSON_ENABLED "Set to OFF to compile without JSON support, disabling the possibility of initialising external forces and/or observables from a JSON file. Disabling JSON can sometimes help with compiling with older compilers" ON)
 OPTION(LEGACY_CODE "Set to ON to compile legacy code, which comprises features and classes that are very rarely used" OFF)
 OPTION(ZSTD_ENABLED "Set to ON to enable zstd compression support" OFF)
+OPTION(COLVARS "Set to ON to compile with the Colvars library (collective-variable biases for MD runs; forces C++17)" OFF)
 
 OPTION(Python "Enable Python bindings" OFF)
 OPTION(OxpySystemInstall "Install oxpy as a system-wide package" OFF)
@@ -214,6 +215,13 @@ if(CUDA)
 		endif()
 	endif()
 endif(CUDA)
+
+if(COLVARS)
+	# the Colvars library requires C++17
+	message(STATUS "Colvars support enabled: setting C++17 as the standard")
+	set(USE_CXX17_FOR_CUDA ON)
+	add_compile_definitions(OXDNA_COLVARS)
+endif()
 
 if(USE_CXX17_FOR_CUDA)
     # CUDA 13+ requires C++17 for CCCL

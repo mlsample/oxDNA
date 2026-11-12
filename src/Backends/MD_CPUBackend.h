@@ -36,6 +36,16 @@ protected:
 
 	void _update_backend_info();
 
+#ifdef OXDNA_COLVARS
+	/// step that the next _compute_forces() call evaluates (see docs/colvars/DESIGN.md, step counter)
+	llint _colvars_step = 0;
+	std::vector<LR_vector> _colvars_positions;
+	std::vector<LR_vector> _colvars_forces;
+
+	/// add the Colvars forces (and energy, to _U) for the current positions
+	void _add_colvars_forces(llint step);
+#endif
+
 public:
 	MD_CPUBackend();
 	virtual ~MD_CPUBackend();

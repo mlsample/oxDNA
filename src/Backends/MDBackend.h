@@ -11,6 +11,11 @@
 
 #include "SimBackend.h"
 
+#ifdef OXDNA_COLVARS
+#include <memory>
+#include "../Colvars/ColvarsManager.h"
+#endif
+
 using namespace std;
 
 /**
@@ -26,6 +31,11 @@ using namespace std;
  [barostat_probability = <float> (the probability that, at each step, the barostat gets activated)]
  [P = <float> (the pressure of the simulation)]
  [delta_L = <float> (controls the box side change by the MC-like barostat)]
+ [colvars_file = <path> (Colvars configuration file; enables Colvars biases on MD runs. Requires oxDNA compiled with -DCOLVARS=ON. Colvars atom numbers are particle index + 1 and Colvars works in oxDNA units ("units oxdna"))]
+ [colvars_output_prefix = <string> (prefix of the Colvars output files, e.g. <prefix>.colvars.traj and <prefix>.colvars.state. Defaults to colvars)]
+ [colvars_input_state = <path> (Colvars state file (or its prefix) to restart from. Defaults to none)]
+ [colvars_restart_frequency = <int> (every how many steps the Colvars state file is written; 0 means only at the end. Defaults to print_conf_interval)]
+ [colvars_seed = <int> (seed of the Colvars Gaussian random number generator. Defaults to a number drawn from the oxDNA random number generator)]
  @endverbatim
  */
 
@@ -54,6 +64,11 @@ protected:
 	bool _lees_edwards;
 	number _shear_rate;
 
+#ifdef OXDNA_COLVARS
+	/// Colvars biases (created in get_settings, initialised by the concrete backend's init())
+	std::unique_ptr<ColvarsManager> _colvars;
+#endif
+
 	/**
 	 * @brief Set the momentum of the centre of mass to 0.
 	 */
@@ -71,6 +86,10 @@ public:
 	void fix_diffusion();
 
 	virtual void print_observables();
+
+#ifdef OXDNA_COLVARS
+	void on_run_end() override;
+#endif
 };
 
 #endif /* MDBACKEND_H_ */

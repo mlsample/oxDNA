@@ -240,6 +240,32 @@ SET(confGenerator_SOURCES
 	Managers/GeneratorManager.cpp
 )
 
+# Colvars (https://colvars.github.io), vendored in extern/colvars: a static PIC library with Lepton
+# folded in. No OpenMP, MPI, Tcl, Torch, GPU or Lepton JIT. The oxDNA-side proxy lives in Colvars/.
+if(COLVARS)
+	set(COLVARS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/extern/colvars)
+	file(GLOB COLVARS_LIB_SOURCES ${COLVARS_DIR}/src/[^.]*.cpp)
+	file(GLOB COLVARS_LEPTON_SOURCES ${COLVARS_DIR}/lepton/src/[^.]*.cpp)
+
+	add_library(colvars_lepton OBJECT ${COLVARS_LEPTON_SOURCES})
+	set_target_properties(colvars_lepton PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+	target_include_directories(colvars_lepton PRIVATE ${COLVARS_DIR}/lepton/include)
+	target_compile_definitions(colvars_lepton PRIVATE LEPTON_BUILDING_STATIC_LIBRARY)
+	# third-party code: no oxDNA warnings, IEEE maths
+	target_compile_options(colvars_lepton PRIVATE -w -fno-fast-math)
+
+	add_library(colvars STATIC ${COLVARS_LIB_SOURCES} $<TARGET_OBJECTS:colvars_lepton>)
+	set_target_properties(colvars PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+	target_compile_definitions(colvars PUBLIC LEPTON LEPTON_USE_STATIC_LIBRARIES)
+	target_include_directories(colvars SYSTEM PUBLIC ${COLVARS_DIR}/src ${COLVARS_DIR}/lepton/include)
+	target_compile_options(colvars PRIVATE -w -fno-fast-math)
+
+	LIST(APPEND common_SOURCES
+		Colvars/ColvarsManager.cpp
+		Colvars/colvarproxy_oxdna.cpp
+	)
+endif()
+
 if(LEGACY_CODE)
 	add_compile_definitions(LEGACY_CODE)
 	SET(common_SOURCES ${common_SOURCES} ${legacy_SOURCES})
@@ -366,6 +392,9 @@ target_include_directories(tinyexpr PUBLIC extern/tinyexpr)
 
 if(ZSTD_ENABLED)
 	target_link_libraries(${lib_name} PRIVATE ${ZSTD_TARGET})
+endif()
+if(COLVARS)
+	target_link_libraries(${lib_name} PRIVATE colvars)
 endif()
 target_link_libraries(${exe_name} PRIVATE ${lib_name} tinyexpr)
 target_link_libraries(DNAnalysis PRIVATE ${lib_name} tinyexpr)

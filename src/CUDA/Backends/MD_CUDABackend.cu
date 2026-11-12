@@ -12,6 +12,11 @@
 #include "../../Interactions/DNAInteraction.h"
 #include "../../Observables/ObservableOutput.h"
 #include "../Thermostats/CUDAThermostatFactory.h"
+#include "colvars_kernels.cuh"
+
+#ifdef OXDNA_COLVARS
+#include "../../Colvars/ColvarsManager.h"
+#endif
 
 #include <typeinfo>
 
@@ -87,6 +92,8 @@ MD_CUDABackend::~MD_CUDABackend() {
 		delete[] _h_forces;
 		delete[] _h_torques;
 	}
+
+	_colvars_free();
 }
 
 void MD_CUDABackend::_host_to_gpu() {
@@ -314,6 +321,10 @@ void MD_CUDABackend::apply_changes_to_simulation_data() {
 	_apply_external_forces_changes();
 
 	_cuda_interaction->sync_GPU();
+
+	// the host particles (and their periodic-image shifts, which fix_diffusion may just have
+	// changed) are now what the GPU holds: recompute the unwrapping offsets
+	_colvars_refresh_offsets();
 }
 
 void MD_CUDABackend::apply_simulation_data_changes() {
@@ -521,6 +532,8 @@ void MD_CUDABackend::_apply_barostat() {
 
 void MD_CUDABackend::_forces_second_step() {
 	_set_external_forces();
+	// the positions moved by _first_step belong to the step that is about to be completed
+	_colvars_apply(current_step() + 1);
 	_cuda_interaction->compute_forces(_cuda_lists, _d_poss, _d_orientations, _d_forces, _d_torques, _d_bonds, _d_cuda_box);
 
 	second_step
@@ -607,6 +620,10 @@ void MD_CUDABackend::sim_step() {
 	if(_print_energy) {
 		c_number energy = GpuUtils::sum_c_number4_to_double_on_GPU(_d_forces, N());
 		_backend_info = Utils::sformat("\tCUDA_energy: %lf", energy / (2. * N()));
+		if(_colvars_active()) {
+			// total Colvars bias energy (SU), not included in CUDA_energy
+			_backend_info += Utils::sformat("\tcolvars_bias: %lf", (double) _colvars_bias_energy);
+		}
 	}
 
 	if(_update_st_every > 0 && (CONFIG_INFO->curr_step % _update_st_every == 0)) {
@@ -632,6 +649,13 @@ void MD_CUDABackend::get_settings(input_file &inp) {
 		}
 		if(_use_edge && _use_barostat) {
 			throw oxDNAException("use_edge and use_barostat are not compatible");
+		}
+	}
+
+	{
+		std::string colvars_file;
+		if(getInputString(&inp, "colvars_file", colvars_file, 0) == KEY_FOUND && _sort_every > 0) {
+			throw oxDNAException("Colvars (colvars_file = %s) is not compatible with CUDA_sort_every > 0 (found CUDA_sort_every = %d): set CUDA_sort_every = 0", colvars_file.c_str(), _sort_every);
 		}
 	}
 
@@ -743,9 +767,13 @@ void MD_CUDABackend::init() {
 
 	OX_LOG(Logger::LOG_INFO, "Allocated CUDA memory: %.2lf MBs", GpuUtils::get_allocated_mem_mb());
 
+	_colvars_init();
+
 	// initialise lists and compute the forces for the first step
 	_cuda_lists->update(_d_poss, _d_list_poss, _d_bonds);
 	_set_external_forces();
+	// step S0: the host particles hold the configuration just read (full host precision)
+	_colvars_apply(current_step(), true);
 	_cuda_interaction->compute_forces(_cuda_lists, _d_poss, _d_orientations, _d_forces, _d_torques, _d_bonds, _d_cuda_box);
 
 	if(_update_st_every > 0) {
@@ -756,6 +784,140 @@ void MD_CUDABackend::init() {
 			_interaction->set_stress_tensor(_cuda_interaction->CPU_stress_tensor(_d_vels));
 		}
 	}
+}
+
+bool MD_CUDABackend::_colvars_active() const {
+#ifdef OXDNA_COLVARS
+	return _colvars != nullptr && _colvars->enabled();
+#else
+	return false;
+#endif
+}
+
+void MD_CUDABackend::_colvars_init() {
+#ifdef OXDNA_COLVARS
+	if(_colvars == nullptr) {
+		return;
+	}
+	// a no-op (enabled() == false) when colvars_file is not set
+	_colvars->init(*CONFIG_INFO->sim_input, _particles, _box.get(), _dt, _T);
+	if(!_colvars->enabled()) {
+		return;
+	}
+
+	if(_sort_every > 0) {
+		throw oxDNAException("Colvars is not compatible with CUDA_sort_every > 0");
+	}
+
+	const std::vector<int> &idx = _colvars->requested_indices();
+	_colvars_n = (int) idx.size();
+	for(int i : idx) {
+		if(i < 0 || i >= N()) {
+			throw oxDNAException("Colvars requested particle index %d, which is out of range [0, %d)", i, N());
+		}
+	}
+
+	_colvars_offset.assign(_colvars_n, LR_vector(0., 0., 0.));
+	_colvars_abs_pos.assign(_colvars_n, LR_vector(0., 0., 0.));
+	_colvars_f.assign(_colvars_n, LR_vector(0., 0., 0.));
+
+	if(_colvars_n > 0) {
+		CUDA_SAFE_CALL(GpuUtils::LR_cudaMalloc<int>(&_d_colvars_idx, _colvars_n * sizeof(int)));
+		CUDA_SAFE_CALL(GpuUtils::LR_cudaMalloc<LR_double4>(&_d_colvars_pos, _colvars_n * sizeof(LR_double4)));
+		CUDA_SAFE_CALL(GpuUtils::LR_cudaMalloc<c_number4>(&_d_colvars_forces, _colvars_n * sizeof(c_number4)));
+		CUDA_SAFE_CALL(cudaMallocHost((void **) &_h_colvars_pos, _colvars_n * sizeof(LR_double4)));
+		CUDA_SAFE_CALL(cudaMallocHost((void **) &_h_colvars_forces, _colvars_n * sizeof(c_number4)));
+		CUDA_SAFE_CALL(cudaMemcpy(_d_colvars_idx, idx.data(), _colvars_n * sizeof(int), cudaMemcpyHostToDevice));
+	}
+
+	_colvars_refresh_offsets();
+
+	OX_LOG(Logger::LOG_INFO, "Colvars: CUDA host round trip enabled for %d particles", _colvars_n);
+#endif
+}
+
+void MD_CUDABackend::_colvars_refresh_offsets() {
+#ifdef OXDNA_COLVARS
+	if(!_colvars_active()) {
+		return;
+	}
+	const std::vector<int> &idx = _colvars->requested_indices();
+	for(int k = 0; k < _colvars_n; k++) {
+		BaseParticle *p = _particles[idx[k]];
+		_colvars_offset[k] = _box->get_abs_pos(p) - p->pos;
+	}
+#endif
+}
+
+void MD_CUDABackend::_colvars_gather_positions() {
+	const int blocks = (_colvars_n + COLVARS_KERNEL_BLOCK - 1) / COLVARS_KERNEL_BLOCK;
+	colvars_gather_positions<c_number4>
+		<<<blocks, COLVARS_KERNEL_BLOCK>>>
+		(_d_poss, _d_colvars_idx, _colvars_n, _d_colvars_pos);
+	CUT_CHECK_ERROR("colvars_gather_positions");
+}
+
+void MD_CUDABackend::_colvars_apply(llint step, bool from_host) {
+#ifdef OXDNA_COLVARS
+	if(!_colvars_active()) {
+		return;
+	}
+
+	if(_colvars_n > 0) {
+		if(from_host) {
+			const std::vector<int> &idx = _colvars->requested_indices();
+			for(int k = 0; k < _colvars_n; k++) {
+				_colvars_abs_pos[k] = _box->get_abs_pos(_particles[idx[k]]);
+			}
+		}
+		else {
+			_colvars_gather_positions();
+			// synchronous on the default stream: waits for the gather (and everything before it)
+			CUDA_SAFE_CALL(cudaMemcpy(_h_colvars_pos, _d_colvars_pos, _colvars_n * sizeof(LR_double4), cudaMemcpyDeviceToHost));
+			for(int k = 0; k < _colvars_n; k++) {
+				const LR_double4 &r = _h_colvars_pos[k];
+				_colvars_abs_pos[k] = LR_vector((number) r.x, (number) r.y, (number) r.z) + _colvars_offset[k];
+			}
+		}
+	}
+
+	_colvars_bias_energy = _colvars->compute(step, _colvars_abs_pos, _box.get(), _colvars_f);
+
+	if(_colvars_n > 0) {
+		if((int) _colvars_f.size() != _colvars_n) {
+			throw oxDNAException("Colvars returned %d forces, expected %d", (int) _colvars_f.size(), _colvars_n);
+		}
+		for(int k = 0; k < _colvars_n; k++) {
+			_h_colvars_forces[k].x = (c_number) _colvars_f[k].x;
+			_h_colvars_forces[k].y = (c_number) _colvars_f[k].y;
+			_h_colvars_forces[k].z = (c_number) _colvars_f[k].z;
+			_h_colvars_forces[k].w = (c_number) 0.f;
+		}
+		CUDA_SAFE_CALL(cudaMemcpy(_d_colvars_forces, _h_colvars_forces, _colvars_n * sizeof(c_number4), cudaMemcpyHostToDevice));
+
+		const int blocks = (_colvars_n + COLVARS_KERNEL_BLOCK - 1) / COLVARS_KERNEL_BLOCK;
+		colvars_add_forces<c_number4>
+			<<<blocks, COLVARS_KERNEL_BLOCK>>>
+			(_d_forces, _d_colvars_idx, _colvars_n, _d_colvars_forces);
+		CUT_CHECK_ERROR("colvars_add_forces");
+	}
+#endif
+}
+
+void MD_CUDABackend::_colvars_free() {
+	if(_d_colvars_idx != nullptr) {
+		CUDA_SAFE_CALL(cudaFree(_d_colvars_idx));
+		CUDA_SAFE_CALL(cudaFree(_d_colvars_pos));
+		CUDA_SAFE_CALL(cudaFree(_d_colvars_forces));
+		CUDA_SAFE_CALL(cudaFreeHost(_h_colvars_pos));
+		CUDA_SAFE_CALL(cudaFreeHost(_h_colvars_forces));
+		_d_colvars_idx = nullptr;
+		_d_colvars_pos = nullptr;
+		_d_colvars_forces = nullptr;
+		_h_colvars_pos = nullptr;
+		_h_colvars_forces = nullptr;
+	}
+	_colvars_n = 0;
 }
 
 #pragma GCC diagnostic pop

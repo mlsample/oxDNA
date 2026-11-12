@@ -52,6 +52,7 @@ protected:
 
 	virtual void _first_step();
 	virtual void _forces_second_step();
+	void _colvars_gather_positions() override;
 
 	void _thermalize() override;
 	void _update_stress_tensor() override;

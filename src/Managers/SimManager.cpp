@@ -12,6 +12,9 @@
 #include "../Utilities/oxDNAException.h"
 #include "../Utilities/Timings.h"
 #include "../Utilities/Utils.h"
+#ifdef OXDNA_COLVARS
+#include "../Backends/MDBackend.h"
+#endif
 
 void gbl_terminate(int arg) {
 	// if the simulation has not started yet, then we make it so pressing ctrl+c twice
@@ -98,6 +101,17 @@ void SimManager::init() {
 
 	OX_LOG(Logger::LOG_INFO, "Initializing backend ", _seed);
 	_backend = BackendFactory::make_backend(_input);
+#ifdef OXDNA_COLVARS
+	{
+		std::string colvars_file, sim_type("MD");
+		if(getInputString(&_input, "colvars_file", colvars_file, 0) == KEY_FOUND) {
+			getInputString(&_input, "sim_type", sim_type, 0);
+			if(sim_type != "MD" || dynamic_cast<MDBackend *>(_backend.get()) == nullptr) {
+				throw oxDNAException("Colvars (colvars_file) is supported only by MD simulations (sim_type = MD), not by sim_type = %s", sim_type.c_str());
+			}
+		}
+	}
+#endif
 	_backend->get_settings(_input);
 
 	// here we handle a few SIG* signals;
@@ -194,6 +208,9 @@ void SimManager::run() {
 
 	// prints the last configuration
 	_backend->print_conf(false, true);
+#ifdef OXDNA_COLVARS
+	_backend->on_run_end();
+#endif
 
 	TimingManager::instance()->print(_steps_run);
 

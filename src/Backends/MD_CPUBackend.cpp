@@ -61,6 +61,14 @@ void MD_CPUBackend::init() {
 		_V_move->init();
 	}
 
+#ifdef OXDNA_COLVARS
+	if(_colvars) {
+		_colvars->init(*CONFIG_INFO->sim_input, _particles, _box.get(), _dt, _T);
+	}
+	// the initial forces belong to the configuration read from file, i.e. to the current step
+	_colvars_step = current_step();
+#endif
+
 	_compute_forces();
 }
 
@@ -164,7 +172,31 @@ void MD_CPUBackend::_compute_forces() {
 			_U += _interaction->pair_interaction_nonbonded(p, q, true, true);
 		}
 	}
+
+#ifdef OXDNA_COLVARS
+	_add_colvars_forces(_colvars_step);
+#endif
 }
+
+#ifdef OXDNA_COLVARS
+void MD_CPUBackend::_add_colvars_forces(llint step) {
+	if(!_colvars || !_colvars->enabled()) {
+		return;
+	}
+
+	const std::vector<int> &idx = _colvars->requested_indices();
+	_colvars_positions.resize(idx.size());
+	for(size_t k = 0; k < idx.size(); k++) {
+		_colvars_positions[k] = _box->get_abs_pos(_particles[idx[k]]);
+	}
+
+	_U += _colvars->compute(step, _colvars_positions, _box.get(), _colvars_forces);
+
+	for(size_t k = 0; k < idx.size(); k++) {
+		_particles[idx[k]]->force += _colvars_forces[k];
+	}
+}
+#endif
 
 void MD_CPUBackend::_second_step() {
 	for(auto p : _particles) {
@@ -205,6 +237,10 @@ void MD_CPUBackend::sim_step() {
 	}
 
 	_timer_forces->resume();
+#ifdef OXDNA_COLVARS
+	// the positions have just been moved to those of step current_step() + 1
+	_colvars_step = current_step() + 1;
+#endif
 	_compute_forces();
 	_second_step();
 

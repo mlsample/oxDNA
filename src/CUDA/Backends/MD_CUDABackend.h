@@ -79,6 +79,40 @@ protected:
 
 	virtual void _init_CUDA_MD_symbols();
 
+	/**
+	 * Colvars host round trip (used only when oxDNA is built with -DCOLVARS=ON and the input sets
+	 * colvars_file; see docs/colvars/DESIGN.md section 3.3). The members are declared
+	 * unconditionally so that the class layout does not depend on OXDNA_COLVARS being defined
+	 * consistently in every translation unit that includes this header.
+	 */
+	int _colvars_n = 0;                          ///< number of Colvars atom slots
+	int *_d_colvars_idx = nullptr;               ///< device copy of requested_indices()
+	LR_double4 *_d_colvars_pos = nullptr;        ///< device gather buffer (slot order)
+	c_number4 *_d_colvars_forces = nullptr;      ///< device Colvars forces (slot order)
+	LR_double4 *_h_colvars_pos = nullptr;        ///< pinned host mirror of _d_colvars_pos
+	c_number4 *_h_colvars_forces = nullptr;      ///< pinned host mirror of _d_colvars_forces
+	std::vector<LR_vector> _colvars_offset;      ///< get_abs_pos(p) - p->pos, per slot (unwrapping)
+	std::vector<LR_vector> _colvars_abs_pos;     ///< unwrapped positions handed to Colvars
+	std::vector<LR_vector> _colvars_f;           ///< forces returned by Colvars
+	number _colvars_bias_energy = 0.;            ///< bias energy (SU) of the last evaluation
+
+	/// true iff a Colvars module is active for this run
+	bool _colvars_active() const;
+	/// creates the Colvars module (if colvars_file is set) and the device buffers
+	void _colvars_init();
+	/// refreshes _colvars_offset from the host particles (after any host -> GPU upload)
+	void _colvars_refresh_offsets();
+	/// fills _d_colvars_pos with the positions of the requested particles (overridden by the mixed backend)
+	virtual void _colvars_gather_positions();
+	/**
+	 * Evaluates Colvars for the configuration of MD step `step` and ADDS the bias forces to _d_forces.
+	 * Must be called after _set_external_forces() (which overwrites _d_forces). If from_host is true
+	 * the positions are taken from the host particles (used once in init()), otherwise they are
+	 * gathered from the device (one D2H and one H2D copy).
+	 */
+	void _colvars_apply(llint step, bool from_host = false);
+	void _colvars_free();
+
 public:
 	MD_CUDABackend();
 	virtual ~MD_CUDABackend();

@@ -223,6 +223,13 @@ public:
 	 */
 	virtual void apply_changes_to_simulation_data();
 
+#ifdef OXDNA_COLVARS
+	/**
+	 * @brief Called by SimManager::run() once, after the final configuration has been printed.
+	 */
+	virtual void on_run_end() {}
+#endif
+
 	long long int current_step() {
 		return _config_info->curr_step;
 	}

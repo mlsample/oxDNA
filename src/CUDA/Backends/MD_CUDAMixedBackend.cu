@@ -7,6 +7,7 @@
 #include "MD_CUDAMixedBackend.h"
 
 #include "CUDA_mixed.cuh"
+#include "colvars_kernels.cuh"
 
 CUDAMixedBackend::CUDAMixedBackend() : MD_CUDABackend() {
 	_d_possd = nullptr;
@@ -104,12 +105,28 @@ void CUDAMixedBackend::_sort_particles() {
 
 void CUDAMixedBackend::_forces_second_step() {
 	this->_set_external_forces();
+	// the positions moved by _first_step belong to the step that is about to be completed
+	_colvars_apply(current_step() + 1);
 	_cuda_interaction->compute_forces(_cuda_lists, _d_poss, _d_orientations, _d_forces, _d_torques, _d_bonds, _d_cuda_box);
 
 	second_step_mixed
 		<<<_particles_kernel_cfg.blocks, _particles_kernel_cfg.threads_per_block>>>
 		(_d_velsd, _d_Lsd, _d_forces, _d_torques, this->_any_rigid_body);
 	CUT_CHECK_ERROR("second_step_mixed");
+}
+
+void CUDAMixedBackend::_colvars_gather_positions() {
+	// _d_possd holds the true (double) positions; before it is allocated (i.e. during
+	// MD_CUDABackend::init) the float copy is the only one available
+	if(_d_possd == nullptr) {
+		MD_CUDABackend::_colvars_gather_positions();
+		return;
+	}
+	const int blocks = (_colvars_n + COLVARS_KERNEL_BLOCK - 1) / COLVARS_KERNEL_BLOCK;
+	colvars_gather_positions<LR_double4>
+		<<<blocks, COLVARS_KERNEL_BLOCK>>>
+		(_d_possd, _d_colvars_idx, _colvars_n, _d_colvars_pos);
+	CUT_CHECK_ERROR("colvars_gather_positions (mixed)");
 }
 
 void CUDAMixedBackend::apply_simulation_data_changes() {
